@@ -425,7 +425,6 @@ sudo systemctl start jenkins
 
 ### Step 12: Enable Firewall
 ```sh
-sudo ufw enable
 sudo ufw allow OpenSSH
 
 # Allow Nginx Full (Both HTTP and HTTPS)
@@ -441,12 +440,11 @@ sudo ufw allow 3001/tcp   # Grafana
 sudo ufw allow 9080/tcp   # Promtail
 sudo ufw allow 8080/tcp   #jenkins
 ```
+``` sudo ufw enable ```
 
 ### Step 13: Copy Backup Scripts
 Ensure automated backups are set up by copying necessary scripts to the VPS.
 
 ---
 
-## Conclusion
-This guide covers all steps needed to deploy a full-stack application on a VPS with security, monitoring, and CI/CD setup. Adjust configurations as per your requirements.
 
