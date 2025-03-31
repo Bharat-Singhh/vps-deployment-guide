@@ -444,6 +444,375 @@ sudo ufw allow 8080/tcp   #jenkins
 
 ### Step 13: Copy Backup Scripts
 Ensure automated backups are set up by copying necessary scripts to the VPS.
+for realtime mongodb backups 
+```sh
+cat backup_system.js
+const { MongoClient } = require('mongodb');
+const { exec } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+// Configuration
+const config = {
+    mongoUri: 'mongodb://localhost:27017',
+    dbName: 'AnantDrishti',
+    backupDir: '/root/backups/mongo_backups',
+    maxBackups: 3  // Keep only last 3 backups
+};
+
+// Ensure backup directory exists
+if (!fs.existsSync(config.backupDir)) {
+    fs.mkdirSync(config.backupDir, { recursive: true });
+}
+
+// Function to create backup using mongodump
+async function createBackup() {
+    function getISTTimestamp() {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + 330); // Convert UTC to IST (UTC+5:30)
+    return now.toISOString().replace(/[:.]/g, '-');
+}
+const timestamp = getISTTimestamp();
+
+    const backupPath = path.join(config.backupDir, `backup-${timestamp}`);
+
+    return new Promise((resolve, reject) => {
+        const command = `mongodump --uri="${config.mongoUri}" --db=${config.dbName} --out=${backupPath}`;
+
+        exec(command, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Backup failed: ${error}`);
+                reject(error);
+                return;
+            }
+            console.log(`Backup created successfully at ${backupPath}`);
+            cleanOldBackups();
+            resolve(backupPath);
+        });
+    });
+}
+
+// Enhanced function to clean old backups
+function cleanOldBackups() {
+    fs.readdir(config.backupDir, (err, files) => {
+        if (err) {
+            console.error(`Error reading backup directory: ${err}`);
+            return;
+        }
+
+        // Get all backup directories with their creation times
+        const backups = files
+            .filter(file => file.startsWith('backup-'))
+            .map(file => ({
+                name: file,
+                path: path.join(config.backupDir, file),
+                time: fs.statSync(path.join(config.backupDir, file)).birthtime
+            }))
+            .sort((a, b) => b.time - a.time); // Sort newest to oldest
+
+        // Keep only the last 3 backups, delete the rest
+        if (backups.length > config.maxBackups) {
+            console.log(`Found ${backups.length} backups, keeping last ${config.maxBackups}`);
+
+            // Get the backups to delete (all except the last 3)
+            const backupsToDelete = backups.slice(config.maxBackups);
+
+            // Delete each old backup
+            backupsToDelete.forEach(backup => {
+                try {
+                    fs.rmSync(backup.path, { recursive: true, force: true });
+                    console.log(`Deleted old backup: ${backup.name} from ${backup.time.toISOString()}`);
+                } catch (error) {
+                    console.error(`Failed to delete backup ${backup.name}:`, error);
+                }
+            });
+
+            console.log(`Cleanup complete. ${backupsToDelete.length} old backups removed.`);
+        } else {
+            console.log(`Current backup count (${backups.length}) is within limit (${config.maxBackups}). No cleanup needed.`);
+        }
+    });
+}
+
+// Function to watch for database changes
+async function watchDatabaseChanges() {
+    try {
+        const client = await MongoClient.connect(config.mongoUri);
+        const db = client.db(config.dbName);
+
+        console.log('Connected to MongoDB, watching for changes...');
+
+        // Watch all collections in the database
+        const changeStream = db.watch([], {
+            fullDocument: 'updateLookup'
+        });
+
+        // Handle change events
+        changeStream.on('change', async (change) => {
+            console.log(`Detected change in database: ${change.operationType}`);
+            try {
+                await createBackup();
+            } catch (error) {
+                console.error('Failed to create backup:', error);
+            }
+        });
+
+        // Handle errors
+        changeStream.on('error', (error) => {
+            console.error('Change stream error:', error);
+            // Attempt to reconnect after error
+            setTimeout(watchDatabaseChanges, 5000);
+        });
+
+        // Handle stream closure
+        changeStream.on('close', () => {
+            console.log('Change stream closed, attempting to reconnect...');
+            setTimeout(watchDatabaseChanges, 5000);
+        });
+
+    } catch (error) {
+        console.error('Failed to connect to MongoDB:', error);
+        // Attempt to reconnect
+        setTimeout(watchDatabaseChanges, 5000);
+    }
+}
+
+// Start the backup system
+watchDatabaseChanges().catch(console.error);
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+    console.log('Shutting down backup system...');
+    process.exit(0);
+});
+```
+mongo sync script
+``` sh
+cat sync_mongo_backups.sh
+#!/bin/bash
+
+# Define local backup directory and Google Drive remote path
+LOCAL_BACKUP_DIR=~/backups/mongo_backups
+GDRIVE_REMOTE="gdrive:Backups/AnantDrishti/Realtime Backup/MongoDB"
+
+# Log file for debugging
+LOG_FILE="$LOCAL_BACKUP_DIR/rclone_sync.log"
+
+echo "Starting sync: $(date)" | tee -a "$LOG_FILE"
+
+# Run rclone sync
+rclone sync -v "$LOCAL_BACKUP_DIR" "$GDRIVE_REMOTE" --log-file="$LOG_FILE"
+
+if [ $? -eq 0 ]; then
+    echo "Sync completed successfully: $(date)" | tee -a "$LOG_FILE"
+else
+    echo "Sync failed! Check the log at $LOG_FILE" | tee -a "$LOG_FILE"
+fi
+```
+daily backup (cronjob) with email 
+```sh
+cat daily_backup.sh
+export TZ="Asia/Kolkata"
+DATE=$(date +"%Y-%m-%d")
+TIME=$(date +"%H:%M:%S")
+SERVER_NAME="AnantDrishti"
+BACKUP_ROOT="/root/backups/daily_backups"
+LOG_FILE="$BACKUP_ROOT/backup_log.log"
+RETENTION_DAYS=7
+
+# Email settings
+EMAIL_TO="harkaran@indraq.com,bharat@indraq.com"
+EMAIL_FROM="info@indraQ.com"
+EMAIL_SIGNATURE="<br><br>
+<strong><span style='color: #073763; font-size: 18px;'>IndraQ Innovations</span></strong><br>
+<strong><span style='color: #073763;'>Email :-</span></strong> <span style='color: #FF8000;'>info@indraQ.com</span><br>
+<strong><span style='color: #073763;'>Phone :-</span></strong> <span style='color: #FF8000;'>+1 (929) 581-8345 / +91 7888818668</span><br>
+<strong><span style='color: #073763;'>Website :-</span></strong> <a href='https://www.indraQ.com' style='color: #FF8000;'>www.indraQ.com</a><br>
+<strong><span style='color: #073763;'>Address :-</span></strong> <span style='color: #FF8000;'>USA | Canada | UK | UAE | India | Australia</span><br>
+<br>
+<img src='https://ci3.googleusercontent.com/mail-sig/AIorK4zkfoQFzAyNk-scwXuNU7BiBFbb-KU14C--n0RdKR3AhUDhyv5wUYKQtZxRc-RBG9KcY7Ow9KNmns6b' alt='' width='200' height='50' />"
+
+EMAIL_FAILURE_SUBJECT="❌ Backup Failed - $SERVER_NAME - $DATE"
+
+# Ensure backup directory exists
+BACKUP_DIR="$BACKUP_ROOT/$DATE"
+mkdir -p "$BACKUP_DIR"
+
+# MongoDB backup configuration
+MONGO_BACKUP_DIR="$BACKUP_DIR/mongo"
+code_backup_dir="$BACKUP_DIR/static_files"
+mkdir -p "$code_backup_dir"
+CODE_BACKUP_NAME="$code_backup_dir/code_backup.tar.gz"
+GDRIVE_BACKUP_ROOT="gdrive:Backups/AnantDrishti/Daily Backups"
+
+# Function to log messages
+log_message() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
+# Check if MongoDB service is running
+if ! pgrep -x "mongod" > /dev/null; then
+    log_message "ERROR: MongoDB service is not running!"
+    EMAIL_FAILURE_BODY="<html><body>
+    <p>Dear <strong>Harkaran Singh</strong>,</p>
+    <p>⚠️ <strong>ALERT:</strong> The automated backup process for $SERVER_NAME failed on $DATE at $TIME.</p>
+    <p><strong>📂 Backup Details:</strong></p>
+    <ul>
+        <li><strong>Backup Status :-</strong> ❌ Failed</li>
+        <li><strong>Backup Date :-</strong> $DATE</li>
+        <li><strong>Error Message :-</strong> MongoDB service is not running</li>
+    </ul>
+    <p>Please <a href='https://indraq.com/' target='_blank'>raise a ticket</a> for assistance.</p>
+    <p>Thanks, Best Regards $EMAIL_SIGNATURE</body></html>"
+
+    echo "$EMAIL_FAILURE_BODY" | mutt -e "set content_type=text/html" -s "$EMAIL_FAILURE_SUBJECT" -a "$LOG_FILE" -- $EMAIL_TO
+    exit 1
+fi
+
+# MongoDB Backup (Only AnantDrishti DB)
+log_message "Starting MongoDB backup for AnantDrishti..."
+if mongodump --db AnantDrishti --out "$MONGO_BACKUP_DIR"; then
+    log_message "MongoDB backup completed successfully"
+else
+    log_message "ERROR: MongoDB backup failed"
+    EMAIL_FAILURE_BODY="<html><body>
+    <p>Dear <strong>Harkaran Singh</strong>,</p>
+    <p>⚠️ <strong>ALERT:</strong> The automated backup process for $SERVER_NAME failed on $DATE at $TIME.</p>
+    <p><strong>📂 Backup Details:</strong></p>
+    <ul>
+        <li><strong>Backup Status :-</strong> ❌ Failed</li>
+        <li><strong>Backup Date :-</strong> $DATE</li>
+        <li><strong>Error Message :-</strong> MongoDB backup failed</li>
+    </ul>
+    <p>Please <a href='https://indraq.com/' target='_blank'>raise a ticket</a> for assistance.</p>
+    <p>Thanks, Best Regards $EMAIL_SIGNATURE</body></html>"
+
+    echo "$EMAIL_FAILURE_BODY" | mutt -e "set content_type=text/html" -s "$EMAIL_FAILURE_SUBJECT" -a "$LOG_FILE" -- $EMAIL_TO
+    exit 1
+fi
+
+# Code Backup
+log_message "Starting code backup..."
+if tar -czf "$CODE_BACKUP_NAME" -C "/var/www/AnantDrishti" .; then
+    log_message "Code backup completed successfully"
+else
+    log_message "ERROR: Code backup failed"
+    EMAIL_FAILURE_BODY="<html><body>
+    <p>Dear <strong>Harkaran Singh</strong>,</p>
+    <p>⚠️ <strong>ALERT:</strong> The automated backup process for $SERVER_NAME failed on $DATE at $TIME.</p>
+    <p><strong>📂 Backup Details:</strong></p>
+    <ul>
+        <li><strong>Backup Status :-</strong> ❌ Failed</li>
+        <li><strong>Backup Date :-</strong> $DATE</li>
+        <li><strong>Error Message :-</strong> Code backup failed</li>
+    </ul>
+    <p>Please <a href='https://indraq.com/' target='_blank'>raise a ticket</a> for assistance.</p>
+    <p>Thanks, Best Regards $EMAIL_SIGNATURE</body></html>"
+
+    echo "$EMAIL_FAILURE_BODY" | mutt -e "set content_type=text/html" -s "$EMAIL_FAILURE_SUBJECT" -a "$LOG_FILE" -- $EMAIL_TO
+    exit 1
+fi
+
+# Calculate Backup Size
+BACKUP_SIZE=$(du -sh "$BACKUP_DIR" | awk '{print $1}')
+
+# Cleanup old local backups (older than retention period)
+log_message "Cleaning up old local backups..."
+find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +$RETENTION_DAYS -exec rm -rf {} \;
+log_message "Local cleanup completed."
+```
+remote backup with email notification
+```sh 
+ cat backup_to_gdrive.sh
+#!/bin/bash
+
+export TZ="Asia/Kolkata"
+DATE=$(date +"%Y-%m-%d")
+TIME=$(date +"%H:%M:%S")
+SERVER_NAME="AnantDrishti"
+BACKUP_ROOT="/root/backups/daily_backups"
+BACKUP_DIR="$BACKUP_ROOT/$DATE"
+LOG_FILE="$BACKUP_ROOT/gdrive_sync_log.log"
+RETENTION_DAYS=7
+GDRIVE_BACKUP_ROOT="gdrive:Backups/AnantDrishti/Daily Backups"
+GDRIVE_BACKUP_DIR="$GDRIVE_BACKUP_ROOT/$DATE"
+EMAIL_TO="harkaran@indraq.com,bharat@indraq.com"
+EMAIL_FROM="info@indraQ.com"
+EMAIL_SIGNATURE="Best regards,<br><br>
+<strong><span style='color: #073763; font-size: 18px;'>IndraQ Innovations</span></strong><br>
+<strong><span style='color: #073763;'>Email :-</span></strong> <span style='color: #FF8000;'>info@indraQ.com</span><br>
+<strong><span style='color: #073763;'>Phone :-</span></strong> <span style='color: #FF8000;'>+1 (929) 581-8345 / +91 7888818668</span><br>
+<strong><span style='color: #073763;'>Website :-</span></strong> <a href='https://www.indraQ.com' style='color: #FF8000;'>www.indraQ.com</a><br>
+<strong><span style='color: #073763;'>Address :-</span></strong> <span style='color: #FF8000;'>USA | Canada | UK | UAE | India | Australia</span><br>"
+EMAIL_FAILURE_SUBJECT="❌ Backup Sync Failed - $SERVER_NAME - $DATE"
+
+log_message() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
+if [ ! -d "$BACKUP_DIR" ]; then
+    log_message "ERROR: Backup directory $BACKUP_DIR does not exist!"
+    EMAIL_FAILURE_BODY="<html><body>
+    <p>Dear <strong>Harkaran Singh</strong>,</p>
+    <p>⚠️ <strong>ALERT:</strong> The automated backup process for $SERVER_NAME failed on $DATE at $TIME.</p>
+    <p><strong>📂 Backup Details:</strong></p>
+    <ul>
+        <li><strong>Backup Status :-</strong> ❌ Failed</li>
+        <li><strong>Backup Date :-</strong> $DATE</li>
+        <li><strong>Error Message :-</strong> Backup directory missing</li>
+        <li><strong>Backup Location :-</strong> $GDRIVE_BACKUP_ROOT</li>
+    </ul>
+    <br>$EMAIL_SIGNATURE</body></html>"
+
+    echo "$EMAIL_FAILURE_BODY" | mutt -e "set content_type=text/html" -s "$EMAIL_FAILURE_SUBJECT" -a "$LOG_FILE" -- $EMAIL_TO
+    exit 1
+fi
+
+log_message "Starting sync to Google Drive..."
+if rclone sync "$BACKUP_DIR" "$GDRIVE_BACKUP_DIR" --log-file="$LOG_FILE"; then
+    log_message "Backup successfully synced to Google Drive"
+    BACKUP_SIZE=$(du -sh "$BACKUP_DIR" | awk '{print $1}')
+
+    log_message "Cleaning up old backups from Google Drive..."
+    rclone delete "$GDRIVE_BACKUP_ROOT" --min-age ${RETENTION_DAYS}d --log-file="$LOG_FILE"
+    rclone rmdirs "$GDRIVE_BACKUP_ROOT" --min-age ${RETENTION_DAYS}d --leave-root --log-file="$LOG_FILE"
+    log_message "Google Drive cleanup completed."
+
+    EMAIL_SUCCESS_SUBJECT="✅ Backup Successfully Completed - $SERVER_NAME - $DATE"
+    EMAIL_SUCCESS_BODY="<html><body>
+    <p>Dear <strong>Harkaran Singh</strong>,</p>
+    <p>The automated backup process for <strong>$SERVER_NAME</strong> was successfully completed on <strong>$DATE</strong> at <strong>$TIME</strong>.</p>
+    <p><strong>📂 Backup Details:</strong></p>
+    <ul>
+        <li><strong>Backup Status :-</strong> ✅ Success</li>
+        <li><strong>Backup Date :-</strong> $DATE</li>
+        <li><strong>Backup Location :-</strong> Google Drive [<a href='https://drive.google.com/drive/folders/1krbMCip0EsFTRl1zvR5yaqWHjerWX7ZI' target='_blank'>Link to backup Folder</a>]</li>
+        <li><strong>Size :-</strong> $BACKUP_SIZE</li>
+    </ul>
+    <br>$EMAIL_SIGNATURE</body></html>"
+
+    echo "$EMAIL_SUCCESS_BODY" | mutt -e "set content_type=text/html" -s "$EMAIL_SUCCESS_SUBJECT" -a "$LOG_FILE" -- $EMAIL_TO
+    log_message "Success email notification sent to $EMAIL_TO"
+else
+    log_message "ERROR: Failed to sync backup to Google Drive"
+    EMAIL_FAILURE_BODY="<html><body>
+    <p>Dear <strong>Harkaran Singh</strong>,</p>
+    <p>⚠️ <strong>ALERT:</strong> The automated backup process for $SERVER_NAME failed on $DATE at $TIME.</p>
+    <p><strong>📂 Backup Details:</strong></p>
+    <ul>
+        <li><strong>Backup Status :-</strong> ❌ Failed</li>
+        <li><strong>Backup Date :-</strong> $DATE</li>
+        <li><strong>Error Message :-</strong> Sync failed</li>
+        <li><strong>Backup Location :-</strong> Google Drive ($GDRIVE_BACKUP_ROOT)</li>
+    </ul>
+    <br>$EMAIL_SIGNATURE</body></html>"
+
+    echo "$EMAIL_FAILURE_BODY" | mutt -e "set content_type=text/html" -s "$EMAIL_FAILURE_SUBJECT" -a "$LOG_FILE" -- $EMAIL_TO
+    exit 1
+fi
+```
+
+
 
 ---
 
