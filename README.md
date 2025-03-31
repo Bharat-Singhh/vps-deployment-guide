@@ -3,6 +3,13 @@
 ## Steps
 
 ### Step 1: Login and Update VPS
+For login use 
+``` ssh root@your_vps_ip ```
+then fill your password 
+
+If you use private key then 
+``` ssh -i "path_to_your_key" root@your_vps_ip ```
+
 ```sh
 sudo apt update
 sudo apt upgrade -y
@@ -56,7 +63,17 @@ sudo systemctl status mongod
 mongodb://127.0.0.1:27017
 ```
 
-### Step 4: Copy Code
+### step 4: install Firewall
+```sh
+sudo apt update
+sudo apt install ufw -y
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp   # Allow HTTP
+sudo ufw allow 443/tcp  # Allow HTTPS
+sudo ufw allow 27017/tcp  # MongoDB
+``` 
+
+### Step 5: Copy Code
 ```sh
 mkdir /var/www
 ```
@@ -65,153 +82,160 @@ Clone the repository using Git or use FileZilla to copy files.
 cd /var/www/your_repo
 ```
 
-### Step 5: Deploy Backend
+### Step 6: Deploy Backend
 ```sh
 cd Backend
 npm install
 npm install -g pm2
-pm2 start server.js --name AnantDrishti
-pm2 startup
+pm2 start server.js --name Backend
+pm2 startup 
 pm2 save
 ```
+allow firewall
+```sudo ufw allow 4000/tcp   # Backend```
+use pm2 list to check status of backend and pm2 logs to check logs
+``` pm2 list ```
+``` pm2 logs pm2_process-name/nbr ```
 
-### Step 6: Deploy Frontend
+### Step 7: Deploy Frontend
 ```sh
 cd Frontend
 npm run build
 ```
 
-### Step 7: Install and Configure Nginx
+### Step 8: Install and Configure Nginx
+Configure DNS Records
+Go to your domain registrar (e.g., Hostinger, Namecheap, GoDaddy, Cloudflare) and add the following DNS records:
+
+```sh
+1. A Record (For Main Domain)
+Type: A
+
+Host: @
+
+Value (IPv4 Address): Your VPS/Public Server IP
+
+TTL: Default (Auto/Automatic)
+```
+```sh
+2. A Record (For WWW Subdomain)
+Type: A
+
+Host: www
+
+Value (IPv4 Address): Your VPS/Public Server IP
+
+TTL: Default (Auto/Automatic)
+```
+
+```sh
+3. CNAME Record (Optional, for API Subdomain)
+If you want to forward API requests to a subdomain like api.yourdomain.com, add:
+
+Type: CNAME
+
+Host: api
+
+Value: yourdomain.com
+
+TTL: Default (Auto/Automatic)
+```
+Now configure nginx so it can handle traffic
 ```sh
 sudo apt install -y nginx
-sudo nano /etc/nginx/sites-available/default
+sudo nano /etc/nginx/sites-available/your_domain.com.conf
 ```
 
 Replace the contents with the following configuration:
 
 ```nginx
-log_format upstreamlog '$server_name to: $upstream_addr [$request] '
-  'upstream_response_time $upstream_response_time '
-  'msec $msec request_time $request_time';
-
 server {
     listen 443 ssl;
-    server_name indraq.tech www.indraq.tech;
-
-    ssl_certificate /etc/letsencrypt/live/indraq.tech/fullchain.pem; # managed by Certbot
-    ssl_certificate_key /etc/letsencrypt/live/indraq.tech/privkey.pem; # managed by Certbot
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-
-    access_log /var/log/nginx/access.log upstreamlog;
-
+    server_name yourdomain.com www.yourdomain.com;
+    
     # Serve Frontend
-    root /var/www/AnantDrishti/Frontend/;
+    root /var/www/your_project/Frontend;
     index index.html index.htm;
 
-# Proxy Requests to Backend (Fixed)
-    location api/ {  # Adjust this path if needed
-        proxy_pass http://localhost:4000; # Use HTTP unless backend is explicitly running HTTPS
+    # Proxy API requests to the backend
+    location /api/ {
+        proxy_pass http://localhost:PORT;  # Ensure this matches your backend service
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
-
-
     }
-    # Fix for /products API route
 
-    # Static file serving
+    # Serve static files from specific directories
     location /Photos {
-        alias /var/www/AnantDrishti/Photos/;
+        alias /var/www/your_project/path_to_Photos/;
         autoindex on;
     }
 
     location /aboutPhotos {
-        alias /var/www/AnantDrishti/aboutPhotos/;
+        alias /var/www/your_project/path_to_aboutPhotos/;
         autoindex on;
     }
 
     location /uploads {
-        alias /var/www/AnantDrishti/Backend/uploads/;
+        alias /var/www/your_project/Path_to_uploads/;
         autoindex on;
     }
 
-location = /nav.html {
-    add_header 'Access-Control-Allow-Origin' 'https://blog.anantdrristi.com';
-    add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS';
-    add_header 'Access-Control-Allow-Headers' 'Content-Type';
-}
-
-
-    # API Routing
-    #location /api/ {
-       # proxy_pass https://127.0.0.1:4000;
-       # proxy_ssl_verify off;
-       # proxy_http_version 1.1;
-        #proxy_set_header Upgrade $http_upgrade;
-        #proxy_set_header Connection 'upgrade';
-       # proxy_set_header Host $host;
-      #  proxy_set_header X-Real-IP $remote_addr;
-     #   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    #}
-}
+    }
 
 # Redirect HTTP to HTTPS
 server {
     listen 80;
-    server_name indraq.tech www.indraq.tech;
+    server_name your_domain.com www.your_domain.com;
     return 301 https://$host$request_uri;
 }
+
 ```
 
 Create a symbolic link to enable the site:
 ```sh
-ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/
+ln -s /etc/nginx/sites-available/your_domain.com.conf /etc/nginx/sites-enabled/
 ```
 
 Test the configuration and restart Nginx:
 ```sh
 nginx -t
 systemctl restart nginx
+sudo ufw allow "Nginx Full"
 ```
 
-### Step 8: Configure SSL Certificates
+### Step 9: Configure SSL Certificates
 Use Certbot to enable SSL:
 ```sh
 sudo apt install certbot python3-certbot-nginx -y
-sudo certbot --nginx -d indraq.tech -d www.indraq.tech
+sudo certbot --nginx -d your_domain.com -d www.your_domain.com
 sudo systemctl restart nginx
 ```
 
-### Step 9: Forward Backend API to a Subdomain
+### Step 10:(Optional Step) Forward Backend API to a Subdomain
+if your backend is directly serving static files (frontend) you dont need this step. skip it.
+
 Edit Nginx config to add a subdomain for API hosting.
 ```sh
-sudo nano /etc/nginx/sites-available/api.indraq.com
+sudo nano /etc/nginx/sites-available/api.your_domain.com.conf
 ```
 replace these following content 
 ```sh
-cat api.indraq.tech
 server {
     listen 80;
-    server_name api.indraq.tech;
+    server_name api.your_domain.com;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name api.indraq.tech;
-
-    ssl_certificate /etc/letsencrypt/live/api.indraq.tech/fullchain.pem; # managed by Certbot
-    ssl_certificate_key /etc/letsencrypt/live/api.indraq.tech/privkey.pem; # managed by Certbot
-    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+    server_name api.your_domain.com;
 
     location / {
-        proxy_pass http://127.0.0.1:4000;  # Ensure this is your backend port
+        proxy_pass http://127.0.0.1:PORT;  # Ensure this is your backend port
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -226,14 +250,84 @@ server {
 ```
 Create a symbolic link to enable the site:
 ```sh
-ln -s /etc/nginx/sites-available/api.indraq.tech /etc/nginx/sites-enabled/
-sudo certbot --nginx -d api.indraq.tech
+ln -s /etc/nginx/sites-available/api.your_domain.com /etc/nginx/sites-enabled/
+sudo certbot --nginx -d api.your_domain.com
 ```
+### Step 11: Install Jenkins
+```sh
+sudo apt install openjdk-17-jdk -y
+wget -q -O - https://pkg.jenkins.io/debian/jenkins.io.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
+echo "deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian binary/" | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
+sudo apt update
+sudo apt install jenkins -y
+sudo systemctl enable jenkins
+sudo systemctl start jenkins
+``` sudo ufw enable ```
 
-### Step 10: Setup Monitoring System
+```
+after installing check status of jenkins and get initial admin password
+```sudo cat /var/lib/jenkins/secrets/initialAdminPassword ```
+now go to your browser ```http://your-server-ip:8080```
+fill admin password and register 
+then install necessary plugins ``` dashboard -> manage jenkins -> plugins``` ie. docker, nodejs,git etc 
+now create new project choose pipeline paste follow code in jenkisfile after editing
+```sh
+pipeline {
+    agent any
+    stages {
+        stage('Clone Repository') {
+            steps {
+                git branch: 'main', credentialsId: 'create_yours_credentions_only_if_yours_repo_is_private', url: 'https://github.com/your_git_link.git'
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                echo 'Building the application...'
+                sh '''
+                # Copy files from Jenkins workspace to /var/www/your_project
+                cp -r "/var/lib/jenkins/workspace/your_project/"* /var/www/your_project/
+                # Navigate to backend
+                cd "/var/www/your_project/backend" || exit 1
+                
+                # Install dependencies
+                rm -rf node_modules package-lock.json
+                npm cache clean --force
+                npm install
+                '''
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo 'Deploying the application...'
+                sh '''
+                cd "/var/www/your_project/frontend"
+                npm i
+                CI=false npm run build #CI=false because it wont treat warnings as errors
+                sudo -S systemctl restart nginx < /dev/null
+
+                
+                # Navigate to deployment directory
+                cd "/var/www/your_project/backend" || exit 1
+                
+                npm i
+                # Restart PM2 process (uncomment the appropriate line)
+                sudo pm2 restart your_project || sudo pm2 start index.js --name your_project
+                pm2 save
+                '''
+            }
+        }
+        
+    }
+}
+```
+```sudo ufw allow 8080/tcp   # jenkins```
+### Step 12: Setup Monitoring System
 install docker and docker compose 
 ```sudo apt install -y docker.io docker-compose```
 Install Prometheus, Grafana, and Loki for system monitoring in docker 
+save this below code in ``` docker-compose.yml``` .
 ```sh 
 version: '3.8'
 
@@ -300,6 +394,10 @@ networks:
   monitoring:
     driver: bridge
 ```
+after saving docker-compose.yml run 
+``` docker-compose up -d ```
+change the config file inside container 
+first save the below files with their respective name ie promtail.conf
 change congig file of promtail
 ```sh
 server:
@@ -326,6 +424,8 @@ scrape_configs:
           pod: pod           # Replace with actual pod name
           __path__: /var/log/nginx/*log
 ```
+save above content inside promtail.conf, local-config.yml and prometheus.yml respectedly file
+
 2. Loki
 ```sh
 auth_enabled: false
@@ -408,43 +508,42 @@ scrape_configs:
     static_configs:
       - targets: ["193.203.160.6:3100"]  # Use VPS IP if Prometheus and Loki are on different hosts
 ```
-Start monitoring
-``` docker-compose up -d ```
 
-
-### Step 11: Install Jenkins
+then copy these file inside container
 ```sh
-sudo apt install openjdk-17-jdk -y
-wget -q -O - https://pkg.jenkins.io/debian/jenkins.io.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
-echo "deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian binary/" | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
-sudo apt update
-sudo apt install jenkins -y
-sudo systemctl enable jenkins
-sudo systemctl start jenkins
+docker cp promtail-config.yml promtail_container:/etc/promtail/config.yml
+docker cp loki-config.yml loki_container:/etc/loki/local-config.yml
+docker cp prometheus.yml prometheus_container:/etc/prometheus/prometheus.yml
 ```
-
-### Step 12: Enable Firewall
+othervise you can paste it manually also 
+ Open a Shell in the Container ```docker exec -it container_name sh ``` and manually edit config file in all container in monitoring 
+Start monitoring
+``` docker-compose restart ```
+Enable Firewall
 ```sh
-sudo ufw allow OpenSSH
-
-# Allow Nginx Full (Both HTTP and HTTPS)
-sudo ufw allow "Nginx Full"
-
-# Allow specific ports
-sudo ufw allow 4000/tcp   # Backend
-sudo ufw allow 27017/tcp  # MongoDB
 sudo ufw allow 3100/tcp   # Loki
 sudo ufw allow 9090/tcp   # Prometheus
 sudo ufw allow 9100/tcp   # Node Exporter
 sudo ufw allow 3001/tcp   # Grafana
 sudo ufw allow 9080/tcp   # Promtail
-sudo ufw allow 8080/tcp   #jenkins
 ```
 ``` sudo ufw enable ```
 
 ### Step 13: Copy Backup Scripts
 Ensure automated backups are set up by copying necessary scripts to the VPS.
-for realtime mongodb backups 
+you need to install these dependency
+```sh
+curl https://rclone.org/install.sh | sudo bash
+```
+```sh
+sudo apt update
+sudo apt install mailutils -y
+```
+```sh
+sudo apt install postfix -y
+```
+now configure rclone and mail service with your mail
+for realtime mongodb backups . it creates a new backup inside backupdir everytime changes are made to mongodb
 ```sh
 cat backup_system.js
 const { MongoClient } = require('mongodb');
@@ -586,7 +685,12 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 ```
-mongo sync script
+```sh
+pm2 start backup_system.js --name backup
+```
+
+Mongo Sync Script
+this script sync these realtime backups to remote gdrive . set cronjob to set syncing frequncy
 ``` sh
 cat sync_mongo_backups.sh
 #!/bin/bash
@@ -610,6 +714,7 @@ else
 fi
 ```
 daily backup (cronjob) with email 
+this script creates complete backup of code and mongodb daily set cronjob to set time 
 ```sh
 cat daily_backup.sh
 export TZ="Asia/Kolkata"
@@ -722,6 +827,7 @@ find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +$RETENTION_DAYS -exe
 log_message "Local cleanup completed."
 ```
 remote backup with email notification
+this script sync all daily backup to the remote google drive.
 ```sh 
  cat backup_to_gdrive.sh
 #!/bin/bash
