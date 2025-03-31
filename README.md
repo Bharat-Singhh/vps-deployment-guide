@@ -150,7 +150,7 @@ Replace the contents with the following configuration:
 
 ```nginx
 server {
-    listen 443 ssl;
+    listen 80;
     server_name yourdomain.com www.yourdomain.com;
     
     # Serve Frontend
