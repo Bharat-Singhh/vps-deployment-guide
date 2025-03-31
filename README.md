@@ -73,7 +73,7 @@ sudo ufw allow 443/tcp  # Allow HTTPS
 sudo ufw allow 27017/tcp  # MongoDB
 ``` 
 
-### Step 5: Copy Code
+### Step 5: Copy your repo
 ```sh
 mkdir /var/www
 ```
