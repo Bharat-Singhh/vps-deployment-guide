@@ -183,6 +183,11 @@ Create a symbolic link to enable the site:
 ```sh
 ln -s /etc/nginx/sites-available/your_domain.com.conf /etc/nginx/sites-enabled/
 ```
+Set correct ownership and permissions:
+```sh
+sudo chown -R www-data:www-data /var/www/your_project/
+sudo chmod -R 755 /var/www/your_project/
+```
 
 Test the configuration and restart Nginx:
 ```sh
@@ -212,6 +217,7 @@ sudo apt install certbot python3-certbot-nginx -y
 sudo certbot --nginx -d your_domain.com -d www.your_domain.com
 sudo systemctl restart nginx
 ```
+
 
 ### Step 10:(Optional Step) Forward Backend API to a Subdomain
 if your backend is directly serving static files (frontend) you dont need this step. skip it.
@@ -940,11 +946,6 @@ if backend is in errored state check logs
 after any change restart pm2
 ``` pm2 restart all # this will restart all pm2 services ```
 
-Set correct ownership and permissions:
-```sh
-sudo chown -R www-data:www-data /var/www/your_project/
-sudo chmod -R 755 /var/www/your_project/
-```
 
 Setting Up Cron Jobs for Automated Backups
 Create scheduled tasks for your backup scripts:
