@@ -82,28 +82,14 @@ Clone the repository using Git or use FileZilla to copy files.
 cd /var/www/your_repo
 ```
 
-### Step 6: Deploy Backend
-```sh
-cd Backend
-npm install
-npm install -g pm2
-pm2 start server.js --name Backend
-pm2 startup 
-pm2 save
-```
-allow firewall
-```sudo ufw allow 4000/tcp   # Backend```
-use pm2 list to check status of backend and pm2 logs to check logs
-``` pm2 list ```
-``` pm2 logs pm2_process-name/nbr ```
 
-### Step 7: Deploy Frontend
+### Step 6: Deploy Frontend
 ```sh
 cd Frontend
 npm run build
 ```
 
-### Step 8: Install and Configure Nginx
+### Step 7: Install and Configure Nginx
 Configure DNS Records
 Go to your domain registrar (e.g., Hostinger, Namecheap, GoDaddy, Cloudflare) and add the following DNS records:
 
@@ -152,14 +138,13 @@ Replace the contents with the following configuration:
 server {
     listen 80;
     server_name yourdomain.com www.yourdomain.com;
-    
-    # Serve Frontend
+
     root /var/www/your_project/Frontend;
     index index.html index.htm;
 
     # Proxy API requests to the backend
     location /api/ {
-        proxy_pass http://localhost:PORT;  # Ensure this matches your backend service
+        proxy_pass http://localhost:PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -168,7 +153,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
-    # Serve static files from specific directories
+    # Serve static files
     location /Photos {
         alias /var/www/your_project/path_to_Photos/;
         autoindex on;
@@ -183,13 +168,12 @@ server {
         alias /var/www/your_project/Path_to_uploads/;
         autoindex on;
     }
-
-    }
+}
 
 # Redirect HTTP to HTTPS
 server {
     listen 80;
-    server_name your_domain.com www.your_domain.com;
+    server_name yourdomain.com www.yourdomain.com;
     return 301 https://$host$request_uri;
 }
 
@@ -206,6 +190,20 @@ nginx -t
 systemctl restart nginx
 sudo ufw allow "Nginx Full"
 ```
+### Step 8: Deploy Backend
+```sh
+cd Backend
+npm install
+npm install -g pm2
+pm2 start server.js --name Backend
+pm2 startup 
+pm2 save
+```
+allow firewall
+```sudo ufw allow 4000/tcp   # Backend```
+use pm2 list to check status of backend and pm2 logs to check logs
+``` pm2 list ```
+``` pm2 logs pm2_process-name/nbr ```
 
 ### Step 9: Configure SSL Certificates
 Use Certbot to enable SSL:
@@ -226,27 +224,21 @@ replace these following content
 ```sh
 server {
     listen 80;
-    server_name api.your_domain.com;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    server_name api.your_domain.com;
+    server_name api.yourdomain.com;
 
     location / {
-        proxy_pass http://127.0.0.1:PORT;  # Ensure this is your backend port
+        proxy_pass http://localhost:4000; # Change this to match your backend server address
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_cache_bypass $http_upgrade;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
-        }
     }
+
+    error_log /var/log/nginx/api_error.log;
+    access_log /var/log/nginx/api_access.log;
 }
+
 ```
 Create a symbolic link to enable the site:
 ```sh
@@ -529,7 +521,7 @@ sudo ufw allow 9080/tcp   # Promtail
 ```
 ``` sudo ufw enable ```
 
-### Step 13: Copy Backup Scripts
+### Step 13: Setup backup system
 Ensure automated backups are set up by copying necessary scripts to the VPS.
 you need to install these dependency
 ```sh
@@ -543,9 +535,8 @@ sudo apt install mailutils -y
 sudo apt install postfix -y
 ```
 now configure rclone and mail service with your mail
-for realtime mongodb backups . it creates a new backup inside backupdir everytime changes are made to mongodb
+for realtime mongodb backups . The real-time MongoDB backup system continuously monitors database changes and creates incremental backups when changes occur.
 ```sh
-cat backup_system.js
 const { MongoClient } = require('mongodb');
 const { exec } = require('child_process');
 const path = require('path');
@@ -685,14 +676,18 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 ```
+Maintains a configured number of recent backups in my case its 3
+
+
+Run using PM2: 
 ```sh
 pm2 start backup_system.js --name backup
 ```
 
 Mongo Sync Script
-this script sync these realtime backups to remote gdrive . set cronjob to set syncing frequncy
+Syncs local MongoDB backups to Google Drive
+Schedule with cron to determine sync frequency
 ``` sh
-cat sync_mongo_backups.sh
 #!/bin/bash
 
 # Define local backup directory and Google Drive remote path
@@ -714,9 +709,10 @@ else
 fi
 ```
 daily backup (cronjob) with email 
-this script creates complete backup of code and mongodb daily set cronjob to set time 
+Creates comprehensive backups of code and database daily
+Includes email notifications of failure
+Manages retention periods for local backups
 ```sh
-cat daily_backup.sh
 export TZ="Asia/Kolkata"
 DATE=$(date +"%Y-%m-%d")
 TIME=$(date +"%H:%M:%S")
@@ -826,10 +822,12 @@ log_message "Cleaning up old local backups..."
 find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +$RETENTION_DAYS -exec rm -rf {} \;
 log_message "Local cleanup completed."
 ```
-remote backup with email notification
-this script sync all daily backup to the remote google drive.
+Remote Backup Script (backup_to_gdrive.sh):
+
+Syncs daily backups to Google Drive
+Sends email confirmations with backup details
+Manages retention periods on Google Drive
 ```sh 
- cat backup_to_gdrive.sh
 #!/bin/bash
 
 export TZ="Asia/Kolkata"
@@ -916,6 +914,50 @@ else
     echo "$EMAIL_FAILURE_BODY" | mutt -e "set content_type=text/html" -s "$EMAIL_FAILURE_SUBJECT" -a "$LOG_FILE" -- $EMAIL_TO
     exit 1
 fi
+```
+### Step 14:  Debugging & Troubleshooting
+if frontend is not running check nginx 
+```sudo systemctl status nginx```
+if its active(running) then its fine othervise check logs 
+```sh
+sudo tail -f /var/log/nginx/error.log
+sudo tail -f /var/log/nginx/access.log
+```
+MongoDB Issues
+
+1. Check if MongoDB is running:
+```sudo systemctl status mongod```
+2. Check MongoDB logs:
+```sudo tail -f /var/log/mongodb/mongod.log```
+3. Test MongoDB connection:
+``` mongo --eval "db.adminCommand('ping')"```
+
+If Backend isn't running:
+1. Check PM2 application status and logs:
+```pm2 list```
+if backend is in errored state check logs 
+```pm2 logs service_name```
+after any change restart pm2
+``` pm2 restart all # this will restart all pm2 services ```
+
+Set correct ownership and permissions:
+```sh
+sudo chown -R www-data:www-data /var/www/your_project/
+sudo chmod -R 755 /var/www/your_project/
+```
+
+Setting Up Cron Jobs for Automated Backups
+Create scheduled tasks for your backup scripts:
+``` crontab -e ```
+Add these entries:
+```sh
+0 */3 * * * /bin/bash /path/to/sync_mongo_backups.sh
+
+# Daily backup at 1:00 AM
+0 1 * * * /bin/bash /path/to/daily_backup.sh
+
+# Sync daily backups to Google Drive at 3:00 AM
+0 3 * * * /bin/bash /path/to/backup_to_gdrive.sh
 ```
 
 
