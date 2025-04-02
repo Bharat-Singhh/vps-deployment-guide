@@ -3,12 +3,18 @@
 ## Steps
 
 ### Step 1: Login and Update VPS
-For login use 
+Get VPS IP from your vps provider (i.e. hostinger)
+
+for login open terminal and use below command
+
 ``` ssh root@your_vps_ip ```
+
 then fill your password 
 
 If you use private key then 
 ``` ssh -i "path_to_your_key" root@your_vps_ip ```
+
+Paste these commands to update and install necessary dependencies (i.e. git, curl, unzip)
 
 ```sh
 sudo apt update
@@ -17,6 +23,11 @@ sudo apt install curl git unzip ufw -y
 ```
 
 ### Step 2: Install Node.js and PM2
+
+Node.js: A JavaScript runtime that allows running backend applications outside the browser, commonly used for building scalable web servers and APIs.
+
+PM2: A production-ready process manager for Node.js applications that ensures uptime, handles process restarts, and provides monitoring/logging features.
+
 ```sh
 # Download and install nvm:
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh | bash
@@ -73,23 +84,71 @@ sudo ufw allow 443/tcp  # Allow HTTPS
 sudo ufw allow 27017/tcp  # MongoDB
 ``` 
 
-### Step 5: Copy your repo
+### Step 5: Clone Your Repository
+
+1. Create the Deployment Directory (if it doesn’t exist):
+
+ ```sudo mkdir -p /var/www/your_repo```
+   
+2. Clone the Repository Using Git:
+
 ```sh
-mkdir /var/www
+cd /var/www
+git clone https://github.com/your-username/your-repo.git your_repo
+cd your_repo
 ```
-Clone the repository using Git or use FileZilla to copy files.
+Alternatively, Upload Files Manually:
+
+Use FileZilla or scp to transfer project files to /var/www/your_repo.
+
+Ensure correct ownership and permissions:
+
 ```sh
-cd /var/www/your_repo
+sudo chown -R www-data:www-data /var/www/your_repo
+sudo chmod -R 755 /var/www/your_repo
+```
+if you don't have git repo 
+Follow these steps to create a Git repository and push your project to GitHub.
+
+Initialize a Local Git Repository
+If you haven't already, navigate to your project directory and initialize Git
+```sh
+cd /path/to/your_project
+git init
 ```
 
+Add Files to the Repository
+
+```git add .```
+
+Commit Your Changes
+
+```git commit -m "Initial commit"```
+
+Connect Local Repo to GitHub
+
+Copy the repository HTTPS or SSH URL from GitHub and run:
+
+```git remote add origin https://github.com/your-username/your-repo.git```
+
+Push Code to GitHub
+
+```git push -u origin main```
 
 ### Step 6: Deploy Frontend
+
+Deploy Frontend, you only need to run npm run build if your frontend is built using React, Vue, Angular, or any framework that requires a build process.
+
 ```sh
 cd Frontend
 npm run build
 ```
+When You Don't Need npm run build
 
-### Step 7: Install and Configure Nginx
+If your frontend consists of only HTML, CSS, and JavaScript (without a framework like React), you don’t need npm run build.
+You can directly copy the frontend files to the web server.
+
+### Step 7: Configure DNS and Set Up Nginx
 Configure DNS Records
 Go to your domain registrar (e.g., Hostinger, Namecheap, GoDaddy, Cloudflare) and add the following DNS records:
 
@@ -210,7 +269,7 @@ use pm2 list to check status of backend and pm2 logs to check logs
 ``` pm2 list ```
 ``` pm2 logs pm2_process-name/nbr ```
 
-### Step 9: Configure SSL Certificates
+### Step 9: Install SSL Certificates
 Use Certbot to enable SSL:
 ```sh
 sudo apt install certbot python3-certbot-nginx -y
@@ -252,6 +311,9 @@ ln -s /etc/nginx/sites-available/api.your_domain.com /etc/nginx/sites-enabled/
 sudo certbot --nginx -d api.your_domain.com
 ```
 ### Step 11: Install Jenkins
+
+Jenkins is an automation server used for CI/CD (Continuous Integration & Continuous Deployment). It helps automate code deployment from your GitHub repository to your VPS.
+
 ```sh
 sudo apt install openjdk-17-jdk -y
 wget -q -O - https://pkg.jenkins.io/debian/jenkins.io.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
@@ -269,6 +331,15 @@ now go to your browser ```http://your-server-ip:8080```
 fill admin password and register 
 then install necessary plugins ``` dashboard -> manage jenkins -> plugins``` ie. docker, nodejs,git etc 
 now create new project choose pipeline paste follow code in jenkisfile after editing
+
+Create a Pipeline to:
+
+Pull code from your GitHub repo automatically.
+
+Build and deploy your Node.js (MERN) app.
+
+Restart services using PM2 after deployment.
+
 ```sh
 pipeline {
     agent any
@@ -322,9 +393,18 @@ pipeline {
 ```
 ```sudo ufw allow 8080/tcp   # jenkins```
 ### Step 12: Setup Monitoring System
+
 install docker and docker compose 
+
 ```sudo apt install -y docker.io docker-compose```
+
 Install Prometheus, Grafana, and Loki for system monitoring in docker 
+
+Prometheus collects system metrics and application performance data.<br>
+Grafana is a web-based dashboard to visualize Prometheus and Loki data.<br>
+Loki is a log aggregation system that stores and queries logs efficiently.<br>
+Nginx Exporter provides real-time metrics for Nginx performance, like request count and response times.<br>
+
 save this below code in ``` docker-compose.yml``` .
 ```sh 
 version: '3.8'
@@ -392,11 +472,20 @@ networks:
   monitoring:
     driver: bridge
 ```
+
 after saving docker-compose.yml run 
+
 ``` docker-compose up -d ```
+
 change the config file inside container 
 first save the below files with their respective name ie promtail.conf
+
+Promtail collects logs and forwards them to Loki.
+
+The promtail-config.yml file contains log scraping configurations.
+
 change congig file of promtail
+
 ```sh
 server:
   http_listen_port: 9080
@@ -422,7 +511,10 @@ scrape_configs:
           pod: pod           # Replace with actual pod name
           __path__: /var/log/nginx/*log
 ```
+
 save above content inside promtail.conf, local-config.yml and prometheus.yml respectedly file
+
+
 
 2. Loki
 ```sh
@@ -527,7 +619,64 @@ sudo ufw allow 9080/tcp   # Promtail
 ```
 ``` sudo ufw enable ```
 
-### Step 13: Setup backup system
+### Step 13: Set Up Grafana Dashboard
+After installing Prometheus, Grafana, and Loki, the next step is to configure Grafana dashboards to visualize logs and system metrics.
+
+1. Access Grafana
+Open Grafana in your browser:
+
+```sh
+http://your-vps-ip:3001 #change port if you changed port in docker-compose.yml
+```
+Log in with:
+```sh
+Username: admin
+
+Password: admin (or the one set during installation)
+```
+
+2. Add Data Sources
+Grafana needs Prometheus and Loki as data sources to visualize logs and metrics.
+```sh
+Add Prometheus as a Data Source
+Go to Configuration → Data Sources.
+
+Click "Add Data Source" → Select Prometheus.
+
+Set URL to: http://prometheus:9090
+
+```
+
+Click "Save & Test" (It should confirm a successful connection).
+
+repeat process for Loki also
+
+3. Import Prebuilt Dashboards
+   
+Grafana has ready-made dashboards for system monitoring.
+```sh
+#Import a Node Exporter Dashboard
+#Go to Dashboards → Import.
+
+#Enter the Dashboard ID: 1860 (for Node Exporter).
+
+#Click "Load" → Select Prometheus as the data source → Import.
+
+#Import a Loki Logs Dashboard
+#Go to Dashboards → Import.
+
+#Enter the Dashboard ID: 12019 (for Loki logs).
+
+#Click "Load" → Select Loki as the data source → Import.
+```
+4. View Metrics & Logs
+System Metrics: Check CPU, RAM, Disk usage in the Node Exporter dashboard.
+
+Nginx Metrics: See request rates, active connections using Nginx Exporter.
+
+Application Logs: View logs in the Loki dashboard for debugging.
+
+### Step 14: Setup backup system
 Ensure automated backups are set up by copying necessary scripts to the VPS.
 you need to install these dependency
 ```sh
