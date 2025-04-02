@@ -278,8 +278,15 @@ sudo systemctl restart nginx
 ```
 
 
-### Step 10:(Optional Step) Forward Backend API to a Subdomain
+### Step 10:(Optional Step) Configure Nginx Reverse Proxy for API Subdomain
 if your backend is directly serving static files (frontend) you dont need this step. skip it.
+
+
+If you have separate backend API from the main frontend domain, it's best to host it on a subdomain (api.your_domain.com).
+
+This allows better organization of services and makes it easier to apply security policies (CORS,Port hiding).
+
+Useful when your frontend is hosted separately (e.g., on Vercel, Netlify, or an S3 bucket).
 
 Edit Nginx config to add a subdomain for API hosting.
 ```sh
@@ -691,6 +698,32 @@ sudo apt install postfix -y
 ```
 now configure rclone and mail service with your mail
 for realtime mongodb backups . The real-time MongoDB backup system continuously monitors database changes and creates incremental backups when changes occur.
+
+Here all four backup scripts explained
+
+1.Real-Time MongoDB Backup System
+   Monitors MongoDB database changes in real time using a change stream.
+   Creates incremental backups whenever changes are detected.
+   keeps only the last 3 backups to manage storage efficiently.
+
+2. MongoDB Backup Sync Script
+   Periodically synchronizes local MongoDB backups to Google Drive using rclone.
+   Maintains an organized backup structure in Google Drive.
+   Uses a cron job to automate the sync process at scheduled intervals.
+   Logs all sync operations for debugging purposes.
+
+3. Daily Backup Script with Email Notifications
+   Creates daily backups of MongoDB and static files (codebase).
+   Sends email notifications if the backup process fails.
+   Implements retention policy by keeping only the last 7 days of backups.
+
+4.Remote Backup Sync Script
+   Uploads daily backups to Google Drive for redundancy.
+   Sends confirmation emails upon successful backup completion or alerts upon failure.
+   Removes old backups from Google Drive to maintain storage efficiency.
+   Logs all operations for tracking and troubleshooting.
+
+   
 ```sh
 const { MongoClient } = require('mongodb');
 const { exec } = require('child_process');
@@ -1073,27 +1106,67 @@ fi
 ### Step 14:  Debugging & Troubleshooting
 if frontend is not running check nginx 
 ```sudo systemctl status nginx```
-if its active(running) then its fine othervise check logs 
+
+If it's active (running) → Nginx is fine.
+
+If it's inactive or failed, proceed to the next step.
+
 ```sh
 sudo tail -f /var/log/nginx/error.log
 sudo tail -f /var/log/nginx/access.log
 ```
+
+check logs for errors and remove them then restart nginx
+
+```systemctl restart nginx```
+
+now check status again if its up and running then good othervise repeat above steps
+
 MongoDB Issues
 
 1. Check if MongoDB is running:
 ```sudo systemctl status mongod```
+
+If active (running) → MongoDB is fine.
+
+If inactive or failed, proceed to the next step.
+
 2. Check MongoDB logs:
 ```sudo tail -f /var/log/mongodb/mongod.log```
-3. Test MongoDB connection:
+
+4. remove error from logs then restart
+
+```systemctl restart mongod```
+
+5. check status again if its active(running) then go to next step otherwise repeat above steps
+
+   ```sudo systemctl status mongod```
+
+6. Test MongoDB connection:
 ``` mongo --eval "db.adminCommand('ping')"```
 
-If Backend isn't running:
-1. Check PM2 application status and logs:
+If the output contains { "ok" : 1 }, the database is running fine.
+
+
+Backend Not Running? Check PM2
+
+
+Check PM2 application status:
+
 ```pm2 list```
-if backend is in errored state check logs 
+If the backend is in an errored state, check logs:
+
 ```pm2 logs service_name```
-after any change restart pm2
-``` pm2 restart all # this will restart all pm2 services ```
+
+Fix errors in the logs, then restart the PM2 services:
+
+```pm2 restart all```
+
+Verify if the backend is running properly:
+
+```pm2 list```
+If the backend is still not running, repeat the above steps.
+
 
 
 Setting Up Cron Jobs for Automated Backups
