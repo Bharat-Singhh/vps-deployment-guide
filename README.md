@@ -1103,7 +1103,7 @@ else
     exit 1
 fi
 ```
-### Step 14:  Debugging & Troubleshooting
+### Step 15:  Debugging & Troubleshooting
 if frontend is not running check nginx 
 ```sudo systemctl status nginx```
 
